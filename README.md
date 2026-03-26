@@ -1,115 +1,232 @@
-=======
-GPU Atomic Contention: A Microbenchmark Study
+# Atomic Contention on GPUs: From Throughput Saturation to Design Implications
 
-This project investigates the scalability limits of atomic operations on GPUs (NVIDIA RTX A2000) by quantifying the impact of thread-level parallelism and hotspot density (contention).
+A CUDA microbenchmark and profiling study showing that GPU atomic contention leads to throughput saturation due to serialization, not memory bandwidth or compute.
 
-The goal is to demonstrate that, unlike CPUs where performance degradation is driven by coherence-induced latency, GPU atomic-heavy workloads are limited by throughput saturation due to atomic serialization.
+---
 
-1. Methodology
+## Overview
 
-We implemented a CUDA microbenchmark where each thread repeatedly performs atomic additions to a limited set of memory addresses:
+This repository investigates the scalability limits of atomic operations on GPUs (NVIDIA RTX A2000).
 
-atomicAdd(&data[idx % K], 1ULL);
+Key findings:
 
-Parameters
+- Not compute-bound (instruction count is constant)
+- Not memory-bandwidth-bound (DRAM usage ~0)
+- Throughput-limited by atomic serialization
 
-N=100000: number of atomic operations per thread
-threads_per_block: 32, 64, 128, 256, 512
-total_threads: 1024 to 32768
-K={1,2,4,8,16,32,64,256}: number of hotspots
+---
 
-1.1 Contention Control
+## Repository Structure
 
-Each thread computes:
+### CUDA Kernels
 
-target=idx mod K
+- `src/atomic_stress.cu`  
+  Basic version of the benchmark (reference implementation)
 
-K=1: all threads access the same address → maximum contention
-K>1: accesses are distributed → reduced contention
-K=256: near contention-free
+- `src/atomic_stress_v3.cu`  
+  Intermediate version used during experimentation
 
-2. Results
-2.1 Effect of Block Size (tpb)
+- `src/atomic_stress_v4.cu`  
+  Final version used for all profiling and reported results
 
-Since GPUs schedule execution at warp granularity (32 threads), threads_per_block affects warp-level parallelism and scheduling behavior.
+All results in this repository are generated using **atomic_stress_v4.cu**
 
-tpb = 128 (4 warps): insufficient parallelism → latency not hidden
-tpb = 256 (8 warps): best balance → stable performance
-tpb = 512 (16 warps): burst contention and reduced scheduling flexibility
+---
 
-2.2 Hotspot Behavior
+### Profiling Script
 
-Throughput for K=1 and K=2 is nearly identical
-Performance improves only when K≥4
+- `scripts/ncu.sh`
 
-This indicates:
-Logical distribution does not guarantee physical parallelism.
-Effective parallelism is limited by hardware resources (L2 slices / memory partitions).
+Runs Nsight Compute multiple times:
 
-2.3 Throughput Saturation
+- K = 1 (high contention)
+- K = 256 (low contention)
+- 5 repetitions per configuration
 
-Increasing thread count leads to early saturation (plateau):
+Generates:
 
-service rate ≈ atomic pipeline capacity
+```
+ncu_resultsK1_*.csv
+ncu_resultsK256_*.csv
+```
 
-Small K (high contention) → low ceiling
-Large K (low contention) → high ceiling
+---
 
-This behavior is well described by: Throughput=min⁡(arrival rate,service rate)
-Here,
-arrival rate ≈ threads × N
-service rate ≈ atomic pipeline capacity
+### Data Processing & Plotting
 
-2.4 Nsight Systems Profiling
+- `scripts/ncu_mean_std_cli_plot.py`
 
-Profiling confirms that the bottleneck lies entirely within the GPU kernel:
+This script:
 
-Kernel execution dominates runtime
-Memory transfers and launch overhead are negligible
-K=256 is ~11.6× faster than K=1
+- Aggregates Nsight Compute CSV files
+- Computes mean and standard deviation
+- Generates summary tables
+- Produces plots (bar charts + normalized comparison)
 
-2.5 Nsight Compute Analysis
+---
 
-We collected the following metrics:
+### Output Data
 
-L2 atomic activity
-LSU instruction count
-Warp stall (lg / membar / selected)
-DRAM throughput
-Key Observations
-L2 atomic activity: 4× higher at K=1
-LSU instructions: identical
-DRAM throughput: ~0
-Stall (lg): ~97% (slightly higher at K=1)
+Located in `results/`:
 
-Interpretation
-Instruction count is identical → not compute-bound
-DRAM usage is negligible → not memory-bandwidth-bound
-Atomic activity increases significantly → atomic pipeline pressure
-Warp execution is almost always stalled → strong backpressure
+- `ncu_resultsK1_*.csv`  
+- `ncu_resultsK256_*.csv`  
+  → Raw profiling outputs
 
-Therefore, the performance difference is caused by contention-induced atomic serialization.
+- `ncu_summary_mean_std.csv`  
+  → Aggregated results (mean ± std)
 
-3. Conclusion
+---
 
-GPU atomic performance is not determined by individual memory latency, but by the throughput of the atomic pipeline.
+## Figures
 
-Small K: serialization → low service rate → low throughput
-Large K: distributed accesses → higher service rate → higher throughput
+### Main Figures
 
-Thus, GPU atomic-heavy workloads are fundamentally throughput-bound, and the primary bottleneck is atomic serialization.
+These figures summarize the core results and should be read in order.
 
-4. CPU vs GPU Comparison
+#### 1. Throughput scaling vs contention
 
-This behavior differs fundamentally from CPUs:
+![Throughput vs K](figures/throughput_vs_K.png)
 
-CPU (e.g., many core )
-Coherence traffic and ownership migration → latency amplification → performance collapse
+Shows how throughput changes as contention increases (smaller K).  
+Demonstrates the presence of a **throughput ceiling**.
 
-GPU
-Atomic serialization → throughput saturation
+---
 
-CPU: latency-bound (coherence-driven)
-GPU: throughput-bound (serialization-driven)
+#### 2. Microarchitectural breakdown
 
-This highlights a fundamental difference in scalability failure modes between CPU and GPU architectures.
+![Three panel](figures/ncu_three_panel.png)
+
+- Left: L2 atomic activity  
+- Center: LSU instruction count  
+- Right: Stall (lg)
+
+Key observation:
+
+- Atomic activity increases significantly
+- Instruction count remains constant
+- Stall remains extremely high (~97%)
+
+---
+
+#### 3. Normalized comparison
+
+![Normalized](figures/ncu_normalized.png)
+
+Metrics normalized to K=256.
+
+Highlights:
+
+- Atomic activity increases (~4×)
+- Instruction count unchanged
+- Stall remains saturated
+
+---
+
+### Additional Figures
+
+#### Throughput vs thread/block configuration
+
+- `figures/throughput/throughput_by_hotspot_tpb_*.png`
+- `figures/throughput/throughput_by_tpb_hotspot_*.png`
+
+#### Execution time analysis
+
+- `figures/time/time_by_tpb_hotspot_*.png`
+
+#### Individual Nsight metrics
+
+- `figures/ncu/ncu_atomic.png`
+- `figures/ncu/ncu_lsu.png`
+- `figures/ncu/ncu_stall_lg.png`
+
+---
+
+## How to Run
+
+### 1. Compile
+
+```
+nvcc -O3 src/atomic_stress_v4.cu -o atomic_stress
+```
+
+---
+
+### 2. Run Nsight Compute profiling
+
+```
+bash scripts/ncu.sh
+```
+
+---
+
+### 3. Aggregate and plot
+
+```
+python scripts/ncu_mean_std_cli_plot.py \
+  --output-dir results \
+  --plot-prefix ncu \
+  --save-run-tables
+```
+
+---
+
+## Results (RTX A2000)
+
+### Key Observations
+
+| Metric | K=1 | K=256 |
+|--------|-----|------|
+| L2 atomic activity | 4× higher | baseline |
+| LSU instructions | identical | identical |
+| DRAM throughput | ~0 | ~0 |
+| Stall (lg) | ~97% | ~95% |
+
+---
+
+## Interpretation
+
+- Same instruction count → not compute-bound  
+- DRAM ~0 → not bandwidth-bound  
+- Atomic activity ↑ → pipeline pressure  
+- Stall ~97% → severe backpressure  
+
+👉 Performance loss comes from **atomic serialization**
+
+---
+
+## Key Insight
+
+Atomic contention does not:
+
+- increase computation  
+- increase memory traffic  
+
+It increases:
+
+👉 **serialization**
+
+Therefore:
+
+👉 GPU atomic-heavy workloads are **throughput-bound**
+
+---
+
+## CPU vs GPU
+
+| CPU (KNL) | GPU (A2000) |
+|----------|------------|
+| Coherence latency | Atomic serialization |
+| Latency-bound | Throughput-bound |
+
+---
+
+## Takeaway
+
+> GPU atomic performance is limited by throughput saturation, not latency.
+
+---
+
+## License
+
+MIT License

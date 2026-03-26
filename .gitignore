@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Build artifacts
+*.o
+*.out
+
+# Editor
+.vscode/
+.idea/
+
+# Temporary files
+tmp/
+temp/
+
+# Local junk
+foo
+foo2
+foo3
+v2.out
+v3.out

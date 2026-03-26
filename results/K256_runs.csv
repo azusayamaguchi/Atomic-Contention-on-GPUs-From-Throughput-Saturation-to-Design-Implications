@@ -1,0 +1,6 @@
+group,file,L2 atomic active (avg),L2 atomic active (sum),LSU inst,DRAM throughput,Stall (lg),Stall (selected),Stall (membar)
+K=256,ncu_resultsK256_1.csv,51200000.0,819200000.0,102401024.0,0.0,95.28,0.08,0.0
+K=256,ncu_resultsK256_2.csv,51200000.0,819200000.0,102401024.0,0.0,95.28,0.08,0.0
+K=256,ncu_resultsK256_3.csv,51200000.0,819200000.0,102401024.0,0.0,95.27,0.08,0.0
+K=256,ncu_resultsK256_4.csv,51200000.0,819200000.0,102401024.0,0.0,95.28,0.08,0.0
+K=256,ncu_resultsK256_5.csv,51200000.0,819200000.0,102401024.0,0.0,95.29,0.08,0.0
